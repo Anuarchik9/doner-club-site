@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#ff5a12" />
+  <meta name="description" content="Doner Club — доставка и самовывоз напрямую." />
+  <title>Doner Club — доставка и самовывоз</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="shell topbar-inner">
+      <a class="brand" href="#" aria-label="Doner Club">
+        <span class="brand-mark">DC</span>
+        <span class="brand-name">Doner Club</span>
+      </a>
+      <nav class="topnav" aria-label="Навигация">
+        <button class="ghost" type="button">RU</button>
+        <button class="profile" type="button">Войти</button>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero shell">
+      <div class="hero-copy">
+        <span class="eyebrow">Астанинский донер</span>
+        <h1>Заказывайте напрямую в Doner Club</h1>
+        <p>Доставка и самовывоз без лишних посредников. Быстро, понятно и по нашим прямым ценам.</p>
+        <div class="hero-points">
+          <span>Халяль</span>
+          <span>Прямые цены</span>
+          <span>Свежеприготовленный заказ</span>
+        </div>
+      </div>
+
+      <div class="order-card" aria-label="Выбор способа получения">
+        <div class="order-title">Как хотите получить заказ?</div>
+        <div class="mode-grid">
+          <button class="mode active" data-mode="delivery" type="button">
+            <strong>Доставка</strong>
+            <span>Привезём по вашему адресу</span>
+          </button>
+          <button class="mode" data-mode="pickup" type="button">
+            <strong>Самовывоз</strong>
+            <span>Заберите в выбранной точке</span>
+          </button>
+        </div>
+
+        <label class="field-label" for="address" id="fieldLabel">Адрес доставки</label>
+        <div class="address-row">
+          <input id="address" type="text" placeholder="Введите улицу и дом" autocomplete="street-address" />
+          <button id="continue" type="button">Продолжить</button>
+        </div>
+        <div class="helper" id="helper">На следующем этапе подключим определение зоны доставки через CRM.</div>
+      </div>
+    </section>
+
+    <section class="shell menu-preview">
+      <div class="section-head">
+        <div>
+          <span class="eyebrow">Меню</span>
+          <h2>Любимые позиции Doner Club</h2>
+        </div>
+        <span class="status">Меню из CRM — следующий этап</span>
+      </div>
+
+      <div class="categories" aria-label="Категории меню">
+        <button class="chip active" type="button">Популярное</button>
+        <button class="chip" type="button">Донеры</button>
+        <button class="chip" type="button">Комбо</button>
+        <button class="chip" type="button">Напитки</button>
+        <button class="chip" type="button">Добавки</button>
+      </div>
+
+      <div class="grid" id="menuGrid">
+        <article class="product">
+          <div class="photo placeholder">DC</div>
+          <div class="product-body">
+            <div class="product-title">Донер</div>
+            <div class="product-desc">Меню скоро будет загружаться напрямую из CRM.</div>
+            <div class="product-foot"><strong>— ₸</strong><button type="button" disabled>+</button></div>
+          </div>
+        </article>
+        <article class="product">
+          <div class="photo placeholder">DC</div>
+          <div class="product-body">
+            <div class="product-title">Комбо</div>
+            <div class="product-desc">Цены, стоп-листы и модификаторы будут синхронизироваться автоматически.</div>
+            <div class="product-foot"><strong>— ₸</strong><button type="button" disabled>+</button></div>
+          </div>
+        </article>
+        <article class="product">
+          <div class="photo placeholder">DC</div>
+          <div class="product-body">
+            <div class="product-title">Напитки</div>
+            <div class="product-desc">Один источник данных для сайта, приложения и киоска.</div>
+            <div class="product-foot"><strong>— ₸</strong><button type="button" disabled>+</button></div>
+          </div>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer shell">
+    <span>Doner Club</span>
+    <span>Собственная экосистема · тестовая версия сайта</span>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
