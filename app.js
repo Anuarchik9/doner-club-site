@@ -1,9 +1,11 @@
 const KIOSK_MENU_URL='https://doner-club-kiosk.onrender.com/kiosk-menu?point=Arai&menu='+encodeURIComponent('Kiosk Арай');
+const KIOSK_STOP_URL='https://doner-club-kiosk.onrender.com/kiosk-stop-list?point=Arai';
+const STOP_REFRESH_MS=30*1000;
 const CART_KEY='donerclub-site-cart-v1';
 const PROFILE_KEY='donerclub-site-profile-v1';
 const FULFILLMENT_KEY='donerclub-site-fulfillment-v1';
 
-let categories=[],products=[],cart=[],selectedProduct=null,fulfillment={mode:'delivery',value:''},profile=null,comment='',promo='';
+let categories=[],products=[],cart=[],selectedProduct=null,stoppedProductIds={},stopRefreshTimer=null,fulfillment={mode:'delivery',value:''},profile=null,comment='',promo='';
 
 const $=s=>document.querySelector(s);
 const money=v=>Math.round(Number(v||0)).toLocaleString('ru-RU')+' ₸';
@@ -20,11 +22,21 @@ function saveCart(){localStorage.setItem(CART_KEY,JSON.stringify(cart))}
 function saveFulfillment(){localStorage.setItem(FULFILLMENT_KEY,JSON.stringify(fulfillment))}
 function total(){return cart.reduce((s,x)=>s+(Number(x.unitPrice)||0)*(Number(x.q)||0),0)}
 function cartCount(){return cart.reduce((s,x)=>s+(Number(x.q)||0),0)}
+function isStoppedProductId(id){return !!stoppedProductIds[String(id||'')]}
+function isOrderTypeGroup(g){
+  const n=String(g&&g.name||'').toLowerCase();
+  return n.includes('тип заказа')||n.includes('формат заказа');
+}
+function availableModifierItems(g){return (g&&g.items||[]).filter(m=>!isStoppedProductId(m&&m.id))}
+function productIsAvailable(p){
+  if(!p||isStoppedProductId(p.itemId))return false;
+  return (p.modifierGroups||[]).every(g=>isOrderTypeGroup(g)||availableModifierItems(g).length>=(Number(g.minQuantity)||0));
+}
 function visibleGroups(p){
-  return (p.modifierGroups||[]).filter(g=>{
-    const n=String(g.name||'').toLowerCase();
-    return !n.includes('тип заказа')&&!n.includes('формат заказа');
-  });
+  return (p&&p.modifierGroups||[]).filter(g=>!isOrderTypeGroup(g)&&availableModifierItems(g).length).map(g=>({...g,items:availableModifierItems(g)}));
+}
+function visibleCategories(){
+  return categories.filter(c=>products.some(p=>p.categoryId===c.id&&productIsAvailable(p)));
 }
 function hasModifiers(p){return visibleGroups(p).some(g=>(g.items||[]).length)}
 function productQty(id){return cart.filter(x=>x.productId===id).reduce((s,x)=>s+x.q,0)}
@@ -49,9 +61,61 @@ async function loadMenu(){
   }
 }
 
+function sameStopMap(a,b){
+  const ak=Object.keys(a||{}).sort(),bk=Object.keys(b||{}).sort();
+  return ak.length===bk.length&&ak.every((v,i)=>v===bk[i]);
+}
+function removeStoppedFromCart(){
+  const before=cart.length;
+  cart=cart.filter(line=>{
+    let itemId=line.itemId;
+    if(!itemId){
+      const product=products.find(p=>p.id===line.productId);
+      itemId=product&&product.itemId;
+    }
+    if(isStoppedProductId(itemId))return false;
+    return !(line.modifierIds||[]).some(isStoppedProductId);
+  });
+  if(cart.length!==before){saveCart();updateCart();refreshCardActions();return true}
+  return false;
+}
+function applyStopList(data){
+  const next={};
+  (data&&data.stoppedProductIds||[]).forEach(id=>next[String(id)]=true);
+  const changed=!sameStopMap(stoppedProductIds,next);
+  stoppedProductIds=next;
+  const cartChanged=removeStoppedFromCart();
+
+  if(selectedProduct&&!productIsAvailable(selectedProduct))closeModal();
+  else if(changed&&$('#modalRoot .productModal'))closeModal();
+
+  if(changed||cartChanged){
+    paintCategories();
+    paintMenu();
+    updateCart();
+  }
+}
+function scheduleStopRefresh(){
+  if(stopRefreshTimer)clearTimeout(stopRefreshTimer);
+  stopRefreshTimer=setTimeout(loadStopList,STOP_REFRESH_MS);
+}
+async function loadStopList(){
+  try{
+    const r=await fetch(KIOSK_STOP_URL,{cache:'no-store'});
+    const data=await r.json();
+    if(!r.ok||!data.success)throw new Error(data.message||data.code||'stop list error');
+    applyStopList(data);
+  }catch(e){
+    // Keep last known stop list; retry in 30 seconds.
+  }finally{
+    scheduleStopRefresh();
+  }
+}
+
 function paintCategories(){
   const root=$('#categories');
-  root.innerHTML=categories.map((c,i)=>'<button class="catBtn '+(i===0?'active':'')+'" data-cat="'+esc(c.id)+'" type="button">'+esc(categoryName(c))+'</button>').join('');
+  const list=visibleCategories();
+  root.innerHTML=list.map((c,i)=>'<button class="catBtn '+(i===0?'active':'')+'" data-cat="'+esc(c.id)+'" type="button">'+esc(categoryName(c))+'</button>').join('');
   root.querySelectorAll('.catBtn').forEach(b=>b.onclick=()=>{
     root.querySelectorAll('.catBtn').forEach(x=>x.classList.remove('active'));
     b.classList.add('active');
@@ -79,8 +143,8 @@ function productCard(p){
 }
 function paintMenu(){
   const root=$('#menuRoot');
-  root.innerHTML=categories.map(c=>{
-    const list=products.filter(p=>p.categoryId===c.id);
+  root.innerHTML=visibleCategories().map(c=>{
+    const list=products.filter(p=>p.categoryId===c.id&&productIsAvailable(p));
     if(!list.length)return '';
     return '<section class="menuGroup" data-section="'+esc(c.id)+'">'+
       '<div class="menuGroupTitle"><h3>'+esc(categoryName(c))+'</h3><span class="menuSource">'+list.length+' поз.</span></div>'+
@@ -104,11 +168,11 @@ function refreshCardActions(){
   });
   bindProductUI(document);
 }
-function handleProduct(p){hasModifiers(p)?openProduct(p):addSimple(p)}
+function handleProduct(p){if(!productIsAvailable(p))return;hasModifiers(p)?openProduct(p):addSimple(p)}
 function addSimple(p){
   const key=p.id+'|';
   const line=cart.find(x=>x.key===key);
-  if(line)line.q++;else cart.push({key,productId:p.id,name:p.name,imageUrl:p.imageUrl||'',basePrice:Number(p.price)||0,unitPrice:Number(p.price)||0,q:1,mods:[]});
+  if(line)line.q++;else cart.push({key,productId:p.id,itemId:p.itemId,name:p.name,imageUrl:p.imageUrl||'',basePrice:Number(p.price)||0,unitPrice:Number(p.price)||0,q:1,mods:[],modifierIds:[]});
   afterCartChange(true);
 }
 function increaseProduct(p){
@@ -170,7 +234,7 @@ function confirmProduct(){
   const ids=mods.map(m=>m.id).sort();
   const key=selectedProduct.id+'|'+ids.join(',');
   const line=cart.find(x=>x.key===key);
-  if(line)line.q++;else cart.push({key,productId:selectedProduct.id,name:selectedProduct.name,imageUrl:selectedProduct.imageUrl||'',basePrice:Number(selectedProduct.price)||0,unitPrice:Number(selectedProduct.price||0)+extra,q:1,mods});
+  if(line)line.q++;else cart.push({key,productId:selectedProduct.id,itemId:selectedProduct.itemId,name:selectedProduct.name,imageUrl:selectedProduct.imageUrl||'',basePrice:Number(selectedProduct.price)||0,unitPrice:Number(selectedProduct.price||0)+extra,q:1,mods,modifierIds:mods.map(m=>m.id)});
   closeModal();afterCartChange(true);
 }
 function closeModal(){$('#modalRoot').innerHTML=''}
@@ -209,7 +273,7 @@ function plural(n,a,b,c){n=Math.abs(n)%100;const n1=n%10;if(n>10&&n<20)return c;
 function paintRecommendations(){
   const root=$('#recommendRail'); if(!root)return;
   const inCart=new Set(cart.map(x=>x.productId));
-  const recs=products.filter(p=>!inCart.has(p.id)&&!hasModifiers(p)).slice(0,6);
+  const recs=products.filter(p=>productIsAvailable(p)&&!inCart.has(p.id)&&!hasModifiers(p)).slice(0,6);
   $('#recommendBlock').style.display=recs.length?'block':'none';
   root.innerHTML=recs.map(p=>'<button class="recCard" data-rec="'+esc(p.id)+'" type="button"><div class="recPhoto">'+productImage(p)+'</div><div class="recName">'+esc(p.name)+'</div><div class="recPrice">'+money(p.price)+'</div></button>').join('');
   root.querySelectorAll('[data-rec]').forEach(b=>b.onclick=()=>{const p=products.find(x=>x.id===b.dataset.rec);if(p)addSimple(p)});
@@ -327,3 +391,4 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();closeC
 
 loadState();
 loadMenu();
+loadStopList();
