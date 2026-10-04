@@ -1,5 +1,5 @@
 const KIOSK_BASE_URL='https://doner-club-kiosk.onrender.com';
-const STOP_REFRESH_MS=30*1000;
+const STOP_REFRESH_MS=60*1000;
 const CART_KEY='donerclub-site-cart-v1';
 const PROFILE_KEY='donerclub-site-profile-v1';
 const FULFILLMENT_KEY='donerclub-site-fulfillment-v1';
@@ -139,7 +139,7 @@ async function loadStopList(){
     if(version!==menuVersion||!menuReady)return;
     applyStopList(data);
   }catch(e){
-    // Keep last known stop list; retry in 30 seconds.
+    // Keep last known stop list; retry in 60 seconds.
   }finally{
     if(version===menuVersion&&menuReady)scheduleStopRefresh();
   }

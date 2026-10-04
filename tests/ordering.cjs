@@ -56,10 +56,10 @@ assert.match(nodes.get('#cartNotice').textContent,/закончились/);
   assert.equal(run('products[0].id'),'new');
   assert.equal(run('isStoppedProductId("new-stop")'),true);
   assert.equal(run('isStoppedProductId("old-stop")'),false);
-  assert.equal(timers.at(-1).ms,30000);
+  assert.equal(timers.at(-1).ms,60000);
   // A pending polling response also belongs only to its starting point.
   const poll=run('loadStopList()');run('menuVersion++');
   respond(4,{stoppedProductIds:['OLD-STOP']});await poll;
   assert.equal(run('isStoppedProductId("old-stop")'),false);
-  console.log('PASS: modifier split, prices, optional deselection, limits, required flavours, stop filtering, point URLs, stale menu/stop responses, 30-second polling');
+  console.log('PASS: modifier split, prices, optional deselection, limits, required flavours, stop filtering, point URLs, stale menu/stop responses, 60-second polling');
 })().catch(e=>{console.error(e);process.exitCode=1});
