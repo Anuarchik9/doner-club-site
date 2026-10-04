@@ -1,5 +1,4 @@
-const KIOSK_MENU_URL='https://doner-club-kiosk.onrender.com/kiosk-menu?point=Arai&menu='+encodeURIComponent('Kiosk Арай');
-const KIOSK_STOP_URL='https://doner-club-kiosk.onrender.com/kiosk-stop-list?point=Arai';
+const KIOSK_BASE_URL='https://doner-club-kiosk.onrender.com';
 const STOP_REFRESH_MS=30*1000;
 const CART_KEY='donerclub-site-cart-v1';
 const PROFILE_KEY='donerclub-site-profile-v1';
@@ -12,6 +11,22 @@ const money=v=>Math.round(Number(v||0)).toLocaleString('ru-RU')+' ₸';
 const esc=v=>String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 const categoryName=c=>c&&c.name?c.name:'Раздел';
 
+function currentPointConfig(){
+  const value=String(fulfillment&&fulfillment.value||'').toLowerCase();
+  if(fulfillment&&fulfillment.mode==='pickup'&&value.includes('республика')){
+    return {key:'RESPUBLIKA',label:'Республика',menu:'Kiosk Республика'};
+  }
+  return {key:'Arai',label:'Арай',menu:'Kiosk Арай'};
+}
+function kioskMenuUrl(){
+  const point=currentPointConfig();
+  return KIOSK_BASE_URL+'/kiosk-menu?point='+encodeURIComponent(point.key)+'&menu='+encodeURIComponent(point.menu);
+}
+function kioskStopUrl(){
+  const point=currentPointConfig();
+  return KIOSK_BASE_URL+'/kiosk-stop-list?point='+encodeURIComponent(point.key);
+}
+
 function loadState(){
   try{cart=JSON.parse(localStorage.getItem(CART_KEY)||'[]')||[]}catch(e){cart=[]}
   try{profile=JSON.parse(localStorage.getItem(PROFILE_KEY)||'null')}catch(e){profile=null}
@@ -22,7 +37,7 @@ function saveCart(){localStorage.setItem(CART_KEY,JSON.stringify(cart))}
 function saveFulfillment(){localStorage.setItem(FULFILLMENT_KEY,JSON.stringify(fulfillment))}
 function total(){return cart.reduce((s,x)=>s+(Number(x.unitPrice)||0)*(Number(x.q)||0),0)}
 function cartCount(){return cart.reduce((s,x)=>s+(Number(x.q)||0),0)}
-function isStoppedProductId(id){return !!stoppedProductIds[String(id||'')]}
+function isStoppedProductId(id){return !!stoppedProductIds[String(id||'').toLowerCase()]}
 function isOrderTypeGroup(g){
   const n=String(g&&g.name||'').toLowerCase();
   return n.includes('тип заказа')||n.includes('формат заказа');
@@ -44,13 +59,14 @@ function productQty(id){return cart.filter(x=>x.productId===id).reduce((s,x)=>s+
 async function loadMenu(){
   const status=$('#menuStatus');
   try{
-    const r=await fetch(KIOSK_MENU_URL,{cache:'no-store'});
+    const point=currentPointConfig();
+    const r=await fetch(kioskMenuUrl(),{cache:'no-store'});
     if(!r.ok)throw new Error('HTTP '+r.status);
     const data=await r.json();
     if(!data.success)throw new Error(data.message||'Не удалось загрузить меню');
     categories=data.categories||[];
     products=data.products||[];
-    status.textContent='Kiosk Арай · iiko · '+products.length+' позиций';
+    status.textContent=point.menu+' · iiko · '+products.length+' позиций';
     paintCategories();
     paintMenu();
     updateCart();
@@ -81,7 +97,7 @@ function removeStoppedFromCart(){
 }
 function applyStopList(data){
   const next={};
-  (data&&data.stoppedProductIds||[]).forEach(id=>next[String(id)]=true);
+  (data&&data.stoppedProductIds||[]).forEach(id=>next[String(id).toLowerCase()]=true);
   const changed=!sameStopMap(stoppedProductIds,next);
   stoppedProductIds=next;
   const cartChanged=removeStoppedFromCart();
@@ -101,7 +117,7 @@ function scheduleStopRefresh(){
 }
 async function loadStopList(){
   try{
-    const r=await fetch(KIOSK_STOP_URL,{cache:'no-store'});
+    const r=await fetch(kioskStopUrl(),{cache:'no-store'});
     const data=await r.json();
     if(!r.ok||!data.success)throw new Error(data.message||data.code||'stop list error');
     applyStopList(data);
@@ -313,7 +329,21 @@ function openFulfillment(){
   paint();
   $('#saveFulfillment').onclick=()=>{
     if(draft.mode==='delivery')draft.value=$('#deliveryAddress')?.value.trim()||'';
-    fulfillment=draft;saveFulfillment();updateFulfillmentUI();closeModal();
+    const beforePoint=currentPointConfig().key;
+    fulfillment=draft;
+    const afterPoint=currentPointConfig().key;
+    saveFulfillment();updateFulfillmentUI();closeModal();
+
+    if(beforePoint!==afterPoint){
+      // Menu, prices and stop-list are point-specific. Do not keep a cart
+      // assembled for another branch.
+      cart=[];
+      stoppedProductIds={};
+      saveCart();
+      updateCart();
+      loadMenu();
+      loadStopList();
+    }
   };
 }
 
