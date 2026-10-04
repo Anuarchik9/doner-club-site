@@ -300,7 +300,7 @@ function confirmProduct(){
   if(line)line.q++;else cart.push({key,productId:selectedProduct.id,itemId:selectedProduct.itemId,name:selectedProduct.name,imageUrl:selectedProduct.imageUrl||'',basePrice:Number(selectedProduct.price)||0,unitPrice:Number(selectedProduct.price||0)+extra,q:1,mods,modifierIds:mods.map(m=>m.id)});
   closeModal();afterCartChange(true);
 }
-function closeModal(){$('#modalRoot').innerHTML='';selectedProduct=null;document.body.classList.remove('modalOpen')}
+function closeModal(){accountView++;$('#modalRoot').innerHTML='';selectedProduct=null;document.body.classList.remove('modalOpen')}
 
 function openCart(){
   $('#profilePopover').classList.remove('open');
@@ -414,42 +414,9 @@ function profileClick(){
   if(!profile){openLogin();return}
   $('#cartDrawer').classList.remove('open');$('#drawerBackdrop').classList.remove('show');document.body.classList.remove('drawerOpen');
   $('#profilePopover').classList.toggle('open');
+  $('#profilePopover').setAttribute('aria-hidden',String(!$('#profilePopover').classList.contains('open')));
 }
-function openLogin(){
-  $('#profilePopover').classList.remove('open');
-  $('#modalRoot').innerHTML='<div class="modalOverlay"><div class="modal simpleModal"><div class="modalTop"><div><h2>Войти в Doner Club</h2><p>Пока используем простую тестовую авторизацию. Позже подключим подтверждение номера через CRM.</p></div><button class="modalClose" id="modalClose" type="button">×</button></div>'+
-    '<label class="field"><span>Имя</span><input id="loginName" placeholder="Ваше имя"></label>'+
-    '<label class="field"><span>Телефон</span><input id="loginPhone" inputmode="tel" value="+7 " placeholder="+7 700 000 00 00" autocomplete="tel"></label>'+
-    '<button class="primaryBtn" id="loginSave" style="width:100%;margin-top:8px" type="button">Продолжить</button></div></div>';
-  $('#modalClose').onclick=closeModal;
-
-  const phoneInput=$('#loginPhone');
-  const formatLoginPhone=()=>{
-    let digits=phoneInput.value.replace(/\D/g,'');
-    if(digits.charAt(0)==='7')digits=digits.slice(1);
-    else if(digits.charAt(0)==='8'&&digits.length>10)digits=digits.slice(1);
-    digits=digits.slice(0,10);
-    const a=digits.slice(0,3),b=digits.slice(3,6),d=digits.slice(6,8),e=digits.slice(8,10);
-    phoneInput.value='+7'+(a?' '+a:'')+(b?' '+b:'')+(d?' '+d:'')+(e?' '+e:'')+(digits.length===0?' ':'');
-  };
-  phoneInput.addEventListener('input',formatLoginPhone);
-  phoneInput.addEventListener('focus',()=>{
-    if(!phoneInput.value.startsWith('+7'))formatLoginPhone();
-    requestAnimationFrame(()=>phoneInput.setSelectionRange(phoneInput.value.length,phoneInput.value.length));
-  });
-  phoneInput.addEventListener('keydown',event=>{
-    if((event.key==='Backspace'||event.key==='Delete')&&phoneInput.selectionStart<=3&&phoneInput.selectionEnd<=3){
-      event.preventDefault();
-    }
-  });
-
-  $('#loginSave').onclick=()=>{
-    const name=$('#loginName').value.trim(),phone=$('#loginPhone').value.trim();
-    const digits=phone.replace(/\D/g,'');
-    if(!name||digits.length!==11||digits.charAt(0)!=='7')return;
-    profile={name,phone};localStorage.setItem(PROFILE_KEY,JSON.stringify(profile));updateProfileUI();closeModal();$('#profilePopover').classList.add('open');
-  };
-}
+function openLogin(){openTelegramLogin()}
 function showInfo(title,text){
   $('#modalRoot').innerHTML='<div class="modalOverlay"><div class="modal simpleModal"><div class="modalTop"><div><h2>'+esc(title)+'</h2><p>'+esc(text)+'</p></div><button class="modalClose" id="modalClose" type="button">×</button></div><button class="primaryBtn" id="modalOk" style="width:100%;margin-top:6px" type="button">Хорошо</button></div></div>';
   $('#modalClose').onclick=closeModal;$('#modalOk').onclick=closeModal;
@@ -467,10 +434,10 @@ function openTextModal(type){
 function openCheckout(){
   if(!cart.length)return;
   const needAddress=fulfillment.mode==='delivery'&&!fulfillment.value;
-  $('#modalRoot').innerHTML='<div class="modalOverlay"><div class="modal simpleModal"><div class="modalTop"><div><h2>Оформление заказа</h2><p>Корзина уже работает. На следующем этапе подключим создание заказа в CRM, оплату и доставку.</p></div><button class="modalClose" id="modalClose" type="button">×</button></div>'+
+  $('#modalRoot').innerHTML='<div class="modalOverlay"><div class="modal simpleModal"><div class="modalTop"><div><h2>Оформление заказа</h2><p>Оплата — онлайн банковской картой через PayLink. Готовим подключение: приём заказов и оплата на новом сайте пока недоступны.</p></div><button class="modalClose" id="modalClose" type="button">×</button></div>'+
     (needAddress?'<button class="primaryBtn" id="setAddressNow" style="width:100%;margin-bottom:8px" type="button">Указать адрес</button>':'')+
     '<div class="cartSummary"><div><span>Сумма корзины</span><b>'+money(total())+'</b></div><div><span>Получение</span><b>'+(fulfillment.mode==='pickup'?'Самовывоз':'Доставка')+'</b></div></div>'+
-    '<button class="primaryBtn" style="width:100%;margin-top:14px;opacity:.5" type="button" disabled>Оплата будет подключена следующим этапом</button></div></div>';
+    '<p class="accountNotice">Онлайн-оплата скоро появится</p><a class="primaryBtn accountFull" href="tel:+77774005090">Позвонить в CALL CENTRE · 24/7</a></div></div>';
   $('#modalClose').onclick=closeModal;
   if($('#setAddressNow'))$('#setAddressNow').onclick=()=>{closeModal();openFulfillment()};
 }
@@ -491,14 +458,14 @@ $('#promoBtn').onclick=()=>openTextModal('promo');
 $('#etaButton').onclick=()=>showInfo('Время получения','Когда подключим реальные заказы, здесь можно будет выбрать ближайшее или запланированное время.');
 $('#checkoutBtn').onclick=openCheckout;
 $('#langBtn').onclick=()=>showInfo('Казахский язык','Переключатель RU/KZ подключим после завершения основной логики сайта.');
-$('#logoutBtn').onclick=()=>{profile=null;localStorage.removeItem(PROFILE_KEY);updateProfileUI();$('#profilePopover').classList.remove('open')};
+$('#logoutBtn').onclick=logoutCustomer;
 document.querySelectorAll('[data-profile-action]').forEach(b=>b.onclick=()=>{
   if(!profile){openLogin();return}
-  const map={orders:['Мои заказы','Здесь появится история заказов из CRM.'],addresses:['Мои адреса','Здесь будут сохранённые адреса доставки.'],data:['Мои данные','Здесь можно будет изменить имя и контактные данные.'],cards:['Банковские карты','Здесь будут сохранённые способы оплаты.']};
-  const x=map[b.dataset.profileAction];showInfo(x[0],x[1]);
+  openAccountSection(b.dataset.profileAction);
 });
 document.addEventListener('click',e=>{if(!e.target.closest('#profilePopover')&&!e.target.closest('#profileBtn'))$('#profilePopover').classList.remove('open')});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();closeCart();$('#profilePopover').classList.remove('open')}});
 
 loadState();
+restoreCustomerSession();
 loadMenu();

@@ -47,6 +47,7 @@
           <p>Выбирайте любимые блюда и удобную точку самовывоза.</p>
           <button class="heroAction" id="heroOrderBtn" type="button">Выбрать блюда</button>
         </div>
+        <div class="heroHours" aria-label="Работаем круглосуточно, каждый день"><strong>24/7</strong><span>Готовим круглосуточно</span><small>Каждый день. В любое время.</small></div>
         <button class="heroBadge" id="directOrderBtn" type="button" aria-label="Прямой заказ — перейти к меню">
           <span>HALAL</span>
           <strong>Прямой заказ</strong>
@@ -91,7 +92,7 @@
 
   <footer class="footer shell">
     <span>© Doner Club</span>
-    <a href="tel:+77774005090">+7 (777) 400-50-90</a>
+    <a class="callCentre" href="tel:+77774005090" aria-label="Call Centre круглосуточно: +7 777 400 50 90"><span class="callIcon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 3H4a1 1 0 0 0-1 1c0 9.4 7.6 17 17 17a1 1 0 0 0 1-1v-3l-5-2-2 2a14 14 0 0 1-7-7l2-2-2-5Z"/></svg></span><span><span class="callTitle">CALL CENTRE <b>24/7</b></span><strong>+7 (777) 400-50-90</strong></span></a>
   </footer>
 
   <div class="drawerBackdrop" id="drawerBackdrop"></div>
@@ -177,6 +178,7 @@
   <div class="modalRoot" id="modalRoot"></div>
   <button id="mobileCart" class="mobileCart" type="button" hidden><span>Мой заказ · <b id="mobileCartCount">0</b></span><strong id="mobileCartTotal">0 ₸</strong></button>
   <div id="cartNotice" class="cartNotice" role="status" aria-live="polite"></div>
+  <script src="account.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
