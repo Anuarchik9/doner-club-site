@@ -332,12 +332,34 @@ function openLogin(){
   $('#profilePopover').classList.remove('open');
   $('#modalRoot').innerHTML='<div class="modalOverlay"><div class="modal simpleModal"><div class="modalTop"><div><h2>Войти в Doner Club</h2><p>Пока используем простую тестовую авторизацию. Позже подключим подтверждение номера через CRM.</p></div><button class="modalClose" id="modalClose" type="button">×</button></div>'+
     '<label class="field"><span>Имя</span><input id="loginName" placeholder="Ваше имя"></label>'+
-    '<label class="field"><span>Телефон</span><input id="loginPhone" inputmode="tel" placeholder="+7 700 000 00 00"></label>'+
+    '<label class="field"><span>Телефон</span><input id="loginPhone" inputmode="tel" value="+7 " placeholder="+7 700 000 00 00" autocomplete="tel"></label>'+
     '<button class="primaryBtn" id="loginSave" style="width:100%;margin-top:8px" type="button">Продолжить</button></div></div>';
   $('#modalClose').onclick=closeModal;
+
+  const phoneInput=$('#loginPhone');
+  const formatLoginPhone=()=>{
+    let digits=phoneInput.value.replace(/\D/g,'');
+    if(digits.charAt(0)==='7')digits=digits.slice(1);
+    else if(digits.charAt(0)==='8'&&digits.length>10)digits=digits.slice(1);
+    digits=digits.slice(0,10);
+    const a=digits.slice(0,3),b=digits.slice(3,6),d=digits.slice(6,8),e=digits.slice(8,10);
+    phoneInput.value='+7'+(a?' '+a:'')+(b?' '+b:'')+(d?' '+d:'')+(e?' '+e:'')+(digits.length===0?' ':'');
+  };
+  phoneInput.addEventListener('input',formatLoginPhone);
+  phoneInput.addEventListener('focus',()=>{
+    if(!phoneInput.value.startsWith('+7'))formatLoginPhone();
+    requestAnimationFrame(()=>phoneInput.setSelectionRange(phoneInput.value.length,phoneInput.value.length));
+  });
+  phoneInput.addEventListener('keydown',event=>{
+    if((event.key==='Backspace'||event.key==='Delete')&&phoneInput.selectionStart<=3&&phoneInput.selectionEnd<=3){
+      event.preventDefault();
+    }
+  });
+
   $('#loginSave').onclick=()=>{
     const name=$('#loginName').value.trim(),phone=$('#loginPhone').value.trim();
-    if(!name||phone.replace(/\D/g,'').length<10)return;
+    const digits=phone.replace(/\D/g,'');
+    if(!name||digits.length!==11||digits.charAt(0)!=='7')return;
     profile={name,phone};localStorage.setItem(PROFILE_KEY,JSON.stringify(profile));updateProfileUI();closeModal();$('#profilePopover').classList.add('open');
   };
 }
