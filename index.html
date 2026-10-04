@@ -42,14 +42,14 @@
         <div class="heroCopy">
           <span class="eyebrow">Doner Club · Астана</span>
           <h1>Вкусно. Быстро. Напрямую.</h1>
-          <p>Заказывайте доставку или самовывоз по нашим прямым ценам.</p>
+          <p>Выбирайте любимые блюда и удобную точку самовывоза.</p>
           <button class="heroAction" id="heroOrderBtn" type="button">Выбрать блюда</button>
         </div>
-        <div class="heroBadge">
+        <button class="heroBadge" id="directOrderBtn" type="button" aria-label="Прямой заказ — перейти к меню">
           <span>HALAL</span>
           <strong>Прямой заказ</strong>
           <small>без лишних посредников</small>
-        </div>
+        </button>
       </div>
     </section>
 
@@ -70,7 +70,7 @@
           <span class="eyebrow">Меню</span>
           <h2>Выберите, что хочется сегодня</h2>
         </div>
-        <div class="menuSource" id="menuStatus">Загружаем меню…</div>
+        <div class="menuSource" id="menuStatus" role="status">Загружаем меню…</div>
       </div>
 
       <div class="categoriesWrap">
@@ -81,7 +81,7 @@
         <div class="menuLoading">
           <div class="spinner"></div>
           <b>Загружаем меню Doner Club</b>
-          <span>Используем то же внешнее меню «Kiosk Арай»</span>
+          <span>Собираем для вас доступные блюда</span>
         </div>
       </div>
     </section>
@@ -89,7 +89,7 @@
 
   <footer class="footer shell">
     <span>© Doner Club</span>
-    <span>Собственная экосистема · тестовая версия</span>
+    <a href="tel:+77774005090">+7 (777) 400-50-90</a>
   </footer>
 
   <div class="drawerBackdrop" id="drawerBackdrop"></div>
@@ -149,7 +149,7 @@
 
     <div class="cartSummary">
       <div><span>Сумма корзины</span><b id="cartSubtotal">0 ₸</b></div>
-      <div><span>Доставка</span><b id="deliveryPrice">Уточняется</b></div>
+      <div><span>Получение</span><b id="deliveryPrice">Самовывоз · бесплатно</b></div>
       <div class="grand"><span>К оплате</span><b id="cartTotal">0 ₸</b></div>
     </div>
 
@@ -173,6 +173,8 @@
   </div>
 
   <div class="modalRoot" id="modalRoot"></div>
+  <button id="mobileCart" class="mobileCart" type="button" hidden><span>Мой заказ · <b id="mobileCartCount">0</b></span><strong id="mobileCartTotal">0 ₸</strong></button>
+  <div id="cartNotice" class="cartNotice" role="status" aria-live="polite"></div>
   <script src="app.js"></script>
 </body>
 </html>

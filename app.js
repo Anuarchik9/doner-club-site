@@ -4,7 +4,8 @@ const CART_KEY='donerclub-site-cart-v1';
 const PROFILE_KEY='donerclub-site-profile-v1';
 const FULFILLMENT_KEY='donerclub-site-fulfillment-v1';
 
-let categories=[],products=[],cart=[],selectedProduct=null,stoppedProductIds={},stopRefreshTimer=null,fulfillment={mode:'delivery',value:''},profile=null,comment='',promo='';
+let categories=[],products=[],cart=[],selectedProduct=null,stoppedProductIds={},stopRefreshTimer=null,fulfillment={mode:'pickup',value:'Арай, 1А'},profile=null,comment='',promo='';
+let menuVersion=0,menuReady=false,categoryObserver=null,noticeTimer=null;
 
 const $=s=>document.querySelector(s);
 const money=v=>Math.round(Number(v||0)).toLocaleString('ru-RU')+' ₸';
@@ -31,6 +32,7 @@ function loadState(){
   try{cart=JSON.parse(localStorage.getItem(CART_KEY)||'[]')||[]}catch(e){cart=[]}
   try{profile=JSON.parse(localStorage.getItem(PROFILE_KEY)||'null')}catch(e){profile=null}
   try{fulfillment=JSON.parse(localStorage.getItem(FULFILLMENT_KEY)||'null')||fulfillment}catch(e){}
+  if(fulfillment.mode!=='pickup'){fulfillment={mode:'pickup',value:'Арай, 1А'};cart=[];saveCart();saveFulfillment()}
   updateProfileUI(); updateFulfillmentUI(); updateCart();
 }
 function saveCart(){localStorage.setItem(CART_KEY,JSON.stringify(cart))}
@@ -58,23 +60,37 @@ function productQty(id){return cart.filter(x=>x.productId===id).reduce((s,x)=>s+
 
 async function loadMenu(){
   const status=$('#menuStatus');
+  const version=++menuVersion;
+  menuReady=false;
+  if(stopRefreshTimer)clearTimeout(stopRefreshTimer);
+  categories=[];products=[];paintCategories();updateCart();
+  status.hidden=false;status.textContent='Загружаем меню…';
+  $('#menuRoot').innerHTML='<div class="menuLoading"><div class="spinner"></div><b>Загружаем меню выбранной точки</b></div>';
   try{
-    const point=currentPointConfig();
-    const r=await fetch(kioskMenuUrl(),{cache:'no-store'});
-    if(!r.ok)throw new Error('HTTP '+r.status);
-    const data=await r.json();
-    if(!data.success)throw new Error(data.message||'Не удалось загрузить меню');
+    const [data,stop]=await Promise.all([fetchMenuData(kioskMenuUrl()),fetchMenuData(kioskStopUrl())]);
+    if(version!==menuVersion)return;
     categories=data.categories||[];
     products=data.products||[];
-    status.textContent=point.menu+' · iiko · '+products.length+' позиций';
+    menuReady=true;
+    applyStopList(stop);
+    status.textContent='';status.hidden=true;
     paintCategories();
     paintMenu();
     updateCart();
   }catch(e){
+    if(version!==menuVersion)return;
     status.textContent='Меню временно недоступно';
-    $('#menuRoot').innerHTML='<div class="menuError"><b>Не удалось загрузить меню</b><span>'+esc(e.message||'Попробуйте ещё раз')+'</span><button class="heroAction" id="retryMenu" type="button" style="margin-top:16px">Повторить</button></div>';
+    $('#menuRoot').innerHTML='<div class="menuError"><b>Не удалось загрузить меню</b><span>Проверьте соединение и попробуйте ещё раз</span><button class="heroAction" id="retryMenu" type="button" style="margin-top:16px">Повторить</button></div>';
     $('#retryMenu').onclick=loadMenu;
+  }finally{
+    if(version===menuVersion&&menuReady)scheduleStopRefresh();
   }
+}
+async function fetchMenuData(url){
+  const r=await fetch(url,{cache:'no-store',signal:AbortSignal.timeout(25000)});
+  const data=await r.json();
+  if(!r.ok||!data.success)throw new Error('Menu unavailable');
+  return data;
 }
 
 function sameStopMap(a,b){
@@ -89,10 +105,11 @@ function removeStoppedFromCart(){
       const product=products.find(p=>p.id===line.productId);
       itemId=product&&product.itemId;
     }
-    if(isStoppedProductId(itemId))return false;
+    const product=products.find(p=>p.id===line.productId);
+    if(!product||!productIsAvailable(product)||isStoppedProductId(itemId))return false;
     return !(line.modifierIds||[]).some(isStoppedProductId);
   });
-  if(cart.length!==before){saveCart();updateCart();refreshCardActions();return true}
+  if(cart.length!==before){saveCart();updateCart();refreshCardActions();notifyCart('Некоторые блюда или добавки закончились — мы убрали их из корзины.');return true}
   return false;
 }
 function applyStopList(data){
@@ -103,7 +120,7 @@ function applyStopList(data){
   const cartChanged=removeStoppedFromCart();
 
   if(selectedProduct&&!productIsAvailable(selectedProduct))closeModal();
-  else if(changed&&$('#modalRoot .productModal'))closeModal();
+  else if(changed&&$('#modalRoot .productModal')){closeModal();if(!cartChanged)notifyCart('Наличие обновилось. Откройте блюдо, чтобы выбрать доступные добавки.')}
 
   if(changed||cartChanged){
     paintCategories();
@@ -116,15 +133,15 @@ function scheduleStopRefresh(){
   stopRefreshTimer=setTimeout(loadStopList,STOP_REFRESH_MS);
 }
 async function loadStopList(){
+  const version=menuVersion;
   try{
-    const r=await fetch(kioskStopUrl(),{cache:'no-store'});
-    const data=await r.json();
-    if(!r.ok||!data.success)throw new Error(data.message||data.code||'stop list error');
+    const data=await fetchMenuData(kioskStopUrl());
+    if(version!==menuVersion||!menuReady)return;
     applyStopList(data);
   }catch(e){
     // Keep last known stop list; retry in 30 seconds.
   }finally{
-    scheduleStopRefresh();
+    if(version===menuVersion&&menuReady)scheduleStopRefresh();
   }
 }
 
@@ -167,11 +184,20 @@ function paintMenu(){
       '<div class="menuGrid">'+list.map(productCard).join('')+'</div></section>';
   }).join('');
   bindProductUI(root);
+  observeCategories();
+}
+function observeCategories(){
+  categoryObserver?.disconnect();
+  categoryObserver=new IntersectionObserver(entries=>{
+    const entry=entries.find(x=>x.isIntersecting);if(!entry)return;
+    document.querySelectorAll('.catBtn').forEach(b=>b.classList.toggle('active',b.dataset.cat===entry.target.dataset.section));
+  },{rootMargin:'-135px 0px -55% 0px'});
+  document.querySelectorAll('.menuGroup').forEach(el=>categoryObserver.observe(el));
 }
 function bindProductUI(scope=document){
   scope.querySelectorAll('[data-product]').forEach(card=>card.onclick=e=>{
     if(e.target.closest('button'))return;
-    const p=products.find(x=>x.id===card.dataset.product); if(p)handleProduct(p);
+    const p=products.find(x=>x.id===card.dataset.product); if(p)openProduct(p);
   });
   scope.querySelectorAll('[data-add]').forEach(b=>b.onclick=e=>{e.stopPropagation();const p=products.find(x=>x.id===b.dataset.add);if(p)handleProduct(p)});
   scope.querySelectorAll('[data-plus-card]').forEach(b=>b.onclick=e=>{e.stopPropagation();const p=products.find(x=>x.id===b.dataset.plusCard);if(p)increaseProduct(p)});
@@ -186,6 +212,7 @@ function refreshCardActions(){
 }
 function handleProduct(p){if(!productIsAvailable(p))return;hasModifiers(p)?openProduct(p):addSimple(p)}
 function addSimple(p){
+  if(!menuReady||!productIsAvailable(p))return;
   const key=p.id+'|';
   const line=cart.find(x=>x.key===key);
   if(line)line.q++;else cart.push({key,productId:p.id,itemId:p.itemId,name:p.name,imageUrl:p.imageUrl||'',basePrice:Number(p.price)||0,unitPrice:Number(p.price)||0,q:1,mods:[],modifierIds:[]});
@@ -201,49 +228,69 @@ function decreaseProduct(id){
 }
 function afterCartChange(open){
   saveCart();updateCart();refreshCardActions();
-  if(open)openCart();
+  if(open)notifyCart('Добавлено в корзину');
+}
+function notifyCart(message){
+  clearTimeout(noticeTimer);$('#cartNotice').textContent=message;$('#cartNotice').classList.add('show');
+  noticeTimer=setTimeout(()=>$('#cartNotice').classList.remove('show'),3500);
 }
 
 function openProduct(p){
+  if(!menuReady||!productIsAvailable(p))return;
   selectedProduct=p;
+  document.body.classList.add('modalOpen');
   const groups=visibleGroups(p);
   const groupHtml=groups.map((g,gi)=>{
     const max=Number(g.maxQuantity)||0;
     const min=Number(g.minQuantity)||0;
-    const radio=max===1;
+    const radio=max===1&&min>0;
     const name='g'+gi;
-    const options=(g.items||[]).map((m,mi)=>{
+    const option=m=>{
       const input=radio?'radio':'checkbox';
       const checked=Number(m.byDefault)>0?'checked':'';
-      return '<label class="modOpt"><input class="modInput" type="'+input+'" name="'+name+'" value="'+esc(m.id)+'" data-group="'+esc(g.id||'')+'" data-price="'+Number(m.price||0)+'" data-name="'+esc(m.name||'')+'" '+checked+'><b>'+esc(m.name||'Добавка')+'</b><small>'+(Number(m.price)>0?'+'+money(m.price):'Бесплатно')+'</small></label>';
-    }).join('');
-    return '<div class="modGroup" data-min="'+min+'" data-max="'+max+'"><div class="modGroupTitle"><strong>'+esc(g.name||'Настройки')+'</strong><small>'+(min>0?'Обязательно':'По желанию')+'</small></div>'+options+'</div>';
+      return '<label class="modOpt '+(Number(m.price)>0?'premiumOpt':'')+'"><input class="modInput" type="'+input+'" name="'+name+'" value="'+esc(m.id)+'" data-group="'+esc(g.id||'')+'" data-price="'+Number(m.price||0)+'" data-name="'+esc(m.name||'')+'" '+checked+'><b>'+esc(m.name||'Добавка')+'</b><small>'+(Number(m.price)>0?'+'+money(m.price):'Без доплаты')+'</small></label>';
+    };
+    const paid=g.items.filter(m=>Number(m.price)>0),free=g.items.filter(m=>!Number(m.price));
+    const exclusions=free.filter(m=>/^(?:-\s*)?без\s/i.test(m.name||''));
+    const other=free.filter(m=>!exclusions.includes(m));
+    const freeBlock=(title,items)=>items.length?'<section class="freeModifierBlock"><h3>'+title+'</h3>'+items.map(option).join('')+'</section>':'';
+    const paidBlock=paid.length?'<section class="premiumModifierBlock"><div class="premiumModifierHead"><h3>Сделать вкуснее</h3><span>Рекомендуем</span></div><p>Добавьте любимое дополнение</p>'+paid.map(option).join('')+'</section>':'';
+    return '<div class="modGroup" data-min="'+min+'" data-max="'+max+'" data-name="'+esc(g.name||'Добавки')+'"><div class="modGroupTitle"><strong>'+esc(g.name||'Настройки')+'</strong><small>'+(min>0?'Выберите '+(min===max?min:'от '+min):'По желанию')+(max>0&&min!==max?' · до '+max:'')+'</small></div>'+paidBlock+freeBlock('Убрать из блюда',exclusions)+freeBlock(/вкус/i.test(g.name||'')||/ava/i.test(p.name||'')?'Выберите вкус':'Настроить под себя',other)+'</div>';
   }).join('');
   const w=Number(p.weightGrams)>0?Math.round(p.weightGrams)+' г':'';
-  $('#modalRoot').innerHTML='<div class="modalOverlay"><div class="modal productModal">'+
+  $('#modalRoot').innerHTML='<div class="modalOverlay"><div class="modal productModal" role="dialog" aria-modal="true" aria-label="'+esc(p.name)+'">'+
     '<div class="productHero">'+productImage(p)+'</div>'+
-    '<div class="productInfo"><div class="modalTop"><div><h2>'+esc(p.name)+'</h2><div class="modalMeta">'+esc(w)+'</div></div><button class="modalClose" id="modalClose" type="button">×</button></div>'+
+    '<div class="productInfo"><div class="productNavigation"><button id="prevProduct" type="button" aria-label="Предыдущее блюдо">←</button><span>Выберите своё любимое</span><button id="nextProduct" type="button" aria-label="Следующее блюдо">→</button></div><div class="modalTop"><div><h2>'+esc(p.name)+'</h2><div class="modalMeta">'+esc(w)+'</div></div><button class="modalClose" id="modalClose" type="button" aria-label="Закрыть">×</button></div>'+
     '<div class="modalDesc">'+esc(p.description||'')+'</div>'+groupHtml+
-    '<div class="modalActions"><button class="secondaryBtn" id="modalBack" type="button">Назад</button><button class="primaryBtn" id="confirmProduct" type="button">Добавить · '+money(p.price)+'</button></div></div></div></div>';
+    '<div id="productValidation" role="status" class="productValidation"></div><div class="modalActions"><button class="secondaryBtn" id="modalBack" type="button">Назад</button><button class="primaryBtn" id="confirmProduct" type="button">Добавить · '+money(p.price)+'</button></div></div></div></div>';
   $('#modalClose').onclick=closeModal; $('#modalBack').onclick=closeModal;
   $('#modalRoot .modalOverlay').onclick=e=>{if(e.target.classList.contains('modalOverlay'))closeModal()};
   document.querySelectorAll('.modInput').forEach(i=>i.onchange=updateProductButton);
   $('#confirmProduct').onclick=confirmProduct;
+  $('#prevProduct').onclick=()=>navigateProduct(-1);$('#nextProduct').onclick=()=>navigateProduct(1);
   updateProductButton();
+  $('#modalClose').focus();
+}
+function navigateProduct(direction){
+  const list=products.filter(productIsAvailable),index=list.findIndex(p=>p.id===selectedProduct?.id);
+  if(list.length)openProduct(list[(index+direction+list.length)%list.length]);
 }
 function updateProductButton(){
   if(!selectedProduct)return;
-  let extra=0,valid=true;
+  let extra=0,valid=productIsAvailable(selectedProduct),messages=[];
   document.querySelectorAll('.modGroup').forEach(g=>{
     const n=g.querySelectorAll('.modInput:checked').length;
     const min=Number(g.dataset.min)||0,max=Number(g.dataset.max)||0;
-    if(n<min||(max>0&&n>max))valid=false;
+    if(n<min||(max>0&&n>max)){valid=false;messages.push(n<min?'Выберите '+min+': '+g.dataset.name:'Можно выбрать не больше '+max+': '+g.dataset.name)}
+    g.querySelectorAll('.modInput').forEach(i=>i.disabled=i.type!=='radio'&&!i.checked&&max>0&&n>=max);
   });
   document.querySelectorAll('.modInput:checked').forEach(i=>extra+=Number(i.dataset.price)||0);
   const b=$('#confirmProduct'); if(b){b.disabled=!valid;b.textContent='Добавить · '+money(Number(selectedProduct.price||0)+extra)}
+  $('#productValidation').textContent=messages.join('. ');
 }
 function confirmProduct(){
   if(!selectedProduct)return;
+  updateProductButton();
   const btn=$('#confirmProduct'); if(btn?.disabled)return;
   const mods=[];let extra=0;
   document.querySelectorAll('.modInput:checked').forEach(i=>{mods.push({id:i.value,groupId:i.dataset.group,name:i.dataset.name,price:Number(i.dataset.price)||0});extra+=Number(i.dataset.price)||0});
@@ -253,7 +300,7 @@ function confirmProduct(){
   if(line)line.q++;else cart.push({key,productId:selectedProduct.id,itemId:selectedProduct.itemId,name:selectedProduct.name,imageUrl:selectedProduct.imageUrl||'',basePrice:Number(selectedProduct.price)||0,unitPrice:Number(selectedProduct.price||0)+extra,q:1,mods,modifierIds:mods.map(m=>m.id)});
   closeModal();afterCartChange(true);
 }
-function closeModal(){$('#modalRoot').innerHTML=''}
+function closeModal(){$('#modalRoot').innerHTML='';selectedProduct=null;document.body.classList.remove('modalOpen')}
 
 function openCart(){
   $('#profilePopover').classList.remove('open');
@@ -265,9 +312,10 @@ function closeCart(){
 function updateCart(){
   const n=cartCount(),sum=total();
   $('#cartTopCount').textContent=n;
+  $('#mobileCart').hidden=!n;$('#mobileCartCount').textContent=n;$('#mobileCartTotal').textContent=money(sum);
   $('#cartCountText').textContent=n+' '+plural(n,'позиция','позиции','позиций');
   $('#cartSubtotal').textContent=money(sum);$('#cartTotal').textContent=money(sum);$('#footerTotal').textContent=money(sum);
-  $('#checkoutBtn').disabled=!cart.length;
+  $('#checkoutBtn').disabled=!cart.length||!menuReady;
   const lines=$('#cartLines');
   if(!cart.length){
     lines.innerHTML='<div class="emptyCart"><b>Корзина пока пустая</b><span>Добавьте блюда из меню</span></div>';
@@ -289,10 +337,15 @@ function plural(n,a,b,c){n=Math.abs(n)%100;const n1=n%10;if(n>10&&n<20)return c;
 function paintRecommendations(){
   const root=$('#recommendRail'); if(!root)return;
   const inCart=new Set(cart.map(x=>x.productId));
-  const recs=products.filter(p=>productIsAvailable(p)&&!inCart.has(p.id)&&!hasModifiers(p)).slice(0,6);
+  const recs=products.filter(p=>productIsAvailable(p)&&!inCart.has(p.id)&&recommendationPriority(p)<11).sort((a,b)=>recommendationPriority(a)-recommendationPriority(b)||Number(a.price)-Number(b.price));
   $('#recommendBlock').style.display=recs.length?'block':'none';
   root.innerHTML=recs.map(p=>'<button class="recCard" data-rec="'+esc(p.id)+'" type="button"><div class="recPhoto">'+productImage(p)+'</div><div class="recName">'+esc(p.name)+'</div><div class="recPrice">'+money(p.price)+'</div></button>').join('');
-  root.querySelectorAll('[data-rec]').forEach(b=>b.onclick=()=>{const p=products.find(x=>x.id===b.dataset.rec);if(p)addSimple(p)});
+  root.querySelectorAll('[data-rec]').forEach(b=>b.onclick=()=>{const p=products.find(x=>x.id===b.dataset.rec);if(p)handleProduct(p)});
+}
+function recommendationPriority(p){
+  const name=String(p.name||'').toLowerCase(),category=String(categories.find(c=>c.id===p.categoryId)?.name||'').toLowerCase();
+  const checks=[/стрип/,/картофель фри|^фри$| фри/,/медов.*соус|соус.*медов/,/фирмен.*соус|соус.*фирмен/,/пончик/,/bubble/,/чай|lipton/,/чесноч.*соус|соус.*чесноч/,/соус/,/pepsi|айран|mirinda|вода|пиала|ava|кинза/,/десерт|слад/];
+  const rank=checks.findIndex(re=>re.test(name));return rank<0?(/напит|бар|дополн|чай|слад/.test(category)?10:11):rank;
 }
 
 function updateFulfillmentUI(){
@@ -303,6 +356,7 @@ function updateFulfillmentUI(){
   $('#fulfillmentValue').textContent=val;
   $('#cartModeLabel').textContent=mode;
   $('#cartModeValue').textContent=val;
+  $('#deliveryPrice').textContent=fulfillment.mode==='pickup'?'Самовывоз · бесплатно':'Скоро';
 }
 function openFulfillment(){
   const pickup=fulfillment.mode==='pickup';
@@ -316,19 +370,22 @@ function openFulfillment(){
     document.querySelectorAll('[data-mode]').forEach(b=>b.classList.toggle('active',b.dataset.mode===draft.mode));
     const f=$('#fulfillmentFields');
     if(draft.mode==='delivery'){
-      f.innerHTML='<label class="field"><span>Адрес доставки</span><input id="deliveryAddress" value="'+esc(draft.value||'')+'" placeholder="Улица, дом, квартира"></label>';
+      f.innerHTML='<section class="deliveryNotice"><span class="deliveryIcon" aria-hidden="true">↗</span><h3>Доставка скоро появится</h3><p>Мы активно готовим запуск и подбираем надёжных партнёров, чтобы привозить ваши любимые блюда быстро и горячими.</p><p>А пока можно выбрать удобную точку самовывоза.</p></section>';
+      $('#saveFulfillment').textContent='Выбрать самовывоз';$('#saveFulfillment').disabled=false;
     }else{
       f.innerHTML='<div class="pointList">'+
         '<button class="pointBtn" data-point="Арай, 1А" type="button"><strong>Doner Club Арай</strong><small>Арай, 1А</small></button>'+
         '<button class="pointBtn" data-point="Республика, 4" type="button"><strong>Doner Club Республика</strong><small>Республика, 4</small></button>'+
       '</div>';
-      f.querySelectorAll('[data-point]').forEach(b=>b.onclick=()=>{draft.value=b.dataset.point;f.querySelectorAll('.pointBtn').forEach(x=>x.style.outline='');b.style.outline='2px solid #ff9b6c'});
+      $('#saveFulfillment').textContent='Сохранить';$('#saveFulfillment').disabled=!draft.value;
+      f.querySelectorAll('[data-point]').forEach(b=>{b.classList.toggle('selected',b.dataset.point===draft.value);b.setAttribute('aria-pressed',String(b.dataset.point===draft.value));b.onclick=()=>{draft.value=b.dataset.point;paint()}});
     }
   };
-  document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{draft.mode=b.dataset.mode;draft.value='';paint()});
+  document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{draft.mode=b.dataset.mode;draft.value=fulfillment.mode==='pickup'?fulfillment.value:'';paint()});
   paint();
   $('#saveFulfillment').onclick=()=>{
-    if(draft.mode==='delivery')draft.value=$('#deliveryAddress')?.value.trim()||'';
+    if(draft.mode==='delivery'){draft.mode='pickup';draft.value=fulfillment.value||'';paint();return}
+    if(!draft.value)return;
     const beforePoint=currentPointConfig().key;
     fulfillment=draft;
     const afterPoint=currentPointConfig().key;
@@ -342,7 +399,7 @@ function openFulfillment(){
       saveCart();
       updateCart();
       loadMenu();
-      loadStopList();
+      notifyCart('Точка изменена. Корзина очищена — цены и наличие могут отличаться.');
     }
   };
 }
@@ -419,6 +476,8 @@ function openCheckout(){
 }
 
 $('#heroOrderBtn').onclick=()=>$('#menu').scrollIntoView({behavior:'smooth'});
+$('#directOrderBtn').onclick=$('#heroOrderBtn').onclick;
+$('#mobileCart').onclick=openCart;
 $('#locationBtn').onclick=openFulfillment;
 $('#fulfillmentMain').onclick=openFulfillment;
 $('#cartFulfillment').onclick=openFulfillment;
@@ -443,4 +502,3 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();closeC
 
 loadState();
 loadMenu();
-loadStopList();
