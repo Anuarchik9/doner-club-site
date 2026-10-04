@@ -300,7 +300,7 @@ function confirmProduct(){
   if(line)line.q++;else cart.push({key,productId:selectedProduct.id,itemId:selectedProduct.itemId,name:selectedProduct.name,imageUrl:selectedProduct.imageUrl||'',basePrice:Number(selectedProduct.price)||0,unitPrice:Number(selectedProduct.price||0)+extra,q:1,mods,modifierIds:mods.map(m=>m.id)});
   closeModal();afterCartChange(true);
 }
-function closeModal(){accountView++;$('#modalRoot').innerHTML='';selectedProduct=null;document.body.classList.remove('modalOpen')}
+function closeModal(){stopTelegramWait();accountView++;$('#modalRoot').innerHTML='';selectedProduct=null;document.body.classList.remove('modalOpen')}
 
 function openCart(){
   $('#profilePopover').classList.remove('open');

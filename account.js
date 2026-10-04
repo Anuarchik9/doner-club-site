@@ -2,13 +2,13 @@
 // Card details are entered only on PayLink's hosted payment page, never stored here.
 const CUSTOMER_API='https://doner-club-crm.onrender.com/api/customer';
 const CUSTOMER_TOKEN_KEY='donerclub-customer-session-v1';
-let addressCache=[],addressVersion=0,accountView=0;
+let addressCache=[],addressVersion=0,accountView=0,stopTelegramWait=()=>{};
 function customerToken(){return sessionStorage.getItem(CUSTOMER_TOKEN_KEY)||''}
 async function customerRequest(path,method='GET',data){
   const r=await fetch(CUSTOMER_API+path,{method,headers:{'Content-Type':'application/json',...(customerToken()?{Authorization:'Bearer '+customerToken()}:{})},body:data===undefined?undefined:JSON.stringify(data),signal:AbortSignal.timeout(20000)});
   const result=await r.json();
   if(r.status===401){sessionStorage.removeItem(CUSTOMER_TOKEN_KEY);if(profile)profile.verified=false}
-  if(!r.ok||!result.ok)throw new Error(result.error||'Не удалось загрузить данные');
+  if(!r.ok||!result.ok){const error=new Error(result.error||'Не удалось загрузить данные');error.status=r.status;throw error}
   return result;
 }
 async function restoreCustomerSession(){
@@ -27,7 +27,7 @@ async function saveAddressBook(items){
   try{localStorage.setItem(addressBookKey(),JSON.stringify(items));return true}catch{notifyCart('Не удалось сохранить. Проверьте настройки хранения данных в браузере.');return false}
 }
 function accountShell(title,body){
-  accountView++;
+  stopTelegramWait();accountView++;
   $('#profilePopover').classList.remove('open');
   $('#profilePopover').setAttribute('aria-hidden','true');
   document.body.classList.add('modalOpen');
@@ -108,32 +108,47 @@ function openAccountCards(){
 }
 
 async function openTelegramLogin(){
-  accountShell('Войти в Doner Club','<p class="accountNote">Подтвердите номер через Telegram, чтобы видеть свои заказы и сохранять данные.</p><form id="telegramPhoneForm"><label class="field"><span>Телефон</span><input id="telegramPhone" inputmode="tel" autocomplete="tel" value="'+esc(profile?.phone||'+7 ')+'" required></label><button id="telegramStart" class="primaryBtn accountFull" type="submit">Получить код в Telegram</button><p id="telegramStatus" class="formStatus" role="status">Проверяем подключение…</p></form>');
+  accountShell('Войти в Doner Club','<p class="accountNote">Подтвердите номер через Telegram, чтобы видеть свои заказы и сохранять данные.</p><form id="telegramPhoneForm"><label class="field"><span>Телефон</span><input id="telegramPhone" inputmode="tel" autocomplete="tel" value="'+esc(profile?.phone||'+7 ')+'" required></label><button id="telegramStart" class="primaryBtn accountFull" type="submit">Продолжить через Telegram</button><p id="telegramStatus" class="formStatus" role="status">Проверяем подключение…</p></form>');
   const input=$('#telegramPhone'),status=$('#telegramStatus'),button=$('#telegramStart'),loginView=accountView;
   button.disabled=true;
   input.oninput=()=>{let d=input.value.replace(/\D/g,'');if(d.startsWith('7')||d.startsWith('8'))d=d.slice(1);input.value='+7 '+d.slice(0,10)};
   input.onkeydown=e=>{if(['Backspace','Delete'].includes(e.key)&&input.selectionStart<=3&&input.selectionEnd<=3)e.preventDefault()};
-  try{const config=await customerRequest('/config');button.disabled=!config.telegramEnabled;status.textContent=config.telegramEnabled?'Код придёт в бот Doner Club после подтверждения номера.':'Вход через Telegram готовится к запуску. Меню доступно без входа.'}catch{status.textContent='Не удалось подключиться. Закройте окно и попробуйте снова.'}
+  try{const config=await customerRequest('/config');button.disabled=!config.telegramEnabled;status.textContent=config.telegramEnabled?'Поделитесь своим номером в боте — сайт войдёт автоматически.':'Вход через Telegram готовится к запуску. Меню доступно без входа.'}catch{status.textContent='Не удалось подключиться. Закройте окно и попробуйте снова.'}
   if(loginView!==accountView)return;
   $('#telegramPhoneForm')?.addEventListener('submit',async e=>{
     e.preventDefault();if(button.disabled)return;
     const phone=input.value.replace(/\D/g,'');if(!/^7\d{10}$/.test(phone)){status.textContent='Введите 10 цифр после +7';return}
     button.disabled=true;status.textContent='Готовим вход…';const view=accountView;
-    try{const challenge=await customerRequest('/auth/start','POST',{phone:'+'+phone});if(view!==accountView||!$('#telegramPhoneForm'))return;showTelegramCode(challenge)}catch(e){status.textContent=e.message;button.disabled=false}
+    try{const challenge=await customerRequest('/auth/start','POST',{phone:'+'+phone,mode:'telegram_approval'});if(view!==accountView||!$('#telegramPhoneForm'))return;showTelegramApproval(challenge)}catch(e){status.textContent=e.message;button.disabled=false}
   });
 }
-function showTelegramCode(challenge){
-  accountShell('Код из Telegram','<p class="accountNote">1. Откройте бота и нажмите «Старт».<br>2. Нажмите «Подтвердить мой номер».<br>3. Введите полученный код здесь в течение 5 минут.</p><a class="primaryBtn accountFull" href="'+esc(challenge.telegramUrl)+'" target="_blank" rel="noopener noreferrer">Открыть Telegram</a><form id="telegramCodeForm"><label class="field"><span>Одноразовый код</span><input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required placeholder="6 цифр"></label><button class="primaryBtn accountFull" type="submit">Войти</button><p id="telegramCodeStatus" class="formStatus" role="status"></p></form><button id="restartLogin" class="secondaryBtn accountFull" type="button">Начать заново</button>');
+function showTelegramApproval(challenge){
+  accountShell('Подтвердите номер в Telegram','<p class="accountNote">1. Откройте бота и нажмите «Старт».<br>2. Нажмите «Подтвердить мой номер».<br>3. Вернитесь в эту вкладку — вход завершится автоматически.</p><a id="telegramOpen" class="primaryBtn accountFull" href="'+esc(challenge.telegramUrl)+'" target="_blank" rel="noopener noreferrer">Открыть Telegram</a><p id="telegramWaitStatus" class="formStatus" role="status">Ожидаем подтверждения номера…</p><p class="accountNote">Запрос действует 5 минут. Вводить код не нужно.</p><button id="restartLogin" class="secondaryBtn accountFull" type="button">Начать заново</button>');
+  const view=accountView,status=$('#telegramWaitStatus'),expires=Date.now()+challenge.expiresIn*1000;
+  let timer,busy=false,stopped=false;
+  const stop=()=>{stopped=true;clearTimeout(timer);window.removeEventListener('focus',wake);document.removeEventListener('visibilitychange',wake)};
+  const wake=()=>{if(!document.hidden&&!stopped&&!busy){clearTimeout(timer);poll()}};
+  stopTelegramWait=stop;
   $('#restartLogin').onclick=openTelegramLogin;
-  $('#telegramCodeForm').onsubmit=async e=>{
-    e.preventDefault();const form=e.currentTarget;if(!form.reportValidity())return;
-    const button=form.querySelector('[type=submit]'),status=$('#telegramCodeStatus'),view=accountView;button.disabled=true;
+  async function poll(){
+    if(stopped||view!==accountView)return stop();
+    if(Date.now()>=expires){status.textContent='Время ожидания истекло. Нажмите «Начать заново».';$('#telegramOpen').removeAttribute('href');return stop()}
+    busy=true;
     try{
-      const result=await customerRequest('/auth/verify','POST',{challenge:challenge.challenge,browserSecret:challenge.browserSecret,code:form.elements.code.value});
-      if(view!==accountView||!$('#telegramCodeForm'))return;
-      sessionStorage.setItem(CUSTOMER_TOKEN_KEY,result.token);profile=result.profile;localStorage.setItem(PROFILE_KEY,JSON.stringify(profile));updateProfileUI();openAccountData();notifyCart('Номер подтверждён. Вы вошли в Doner Club.');
-    }catch(e){status.textContent=e.message;button.disabled=false}
-  };
+      const result=await customerRequest('/auth/status','POST',{challenge:challenge.challenge,browserSecret:challenge.browserSecret});
+      if(stopped||view!==accountView)return;
+      if(result.token){
+        stop();sessionStorage.setItem(CUSTOMER_TOKEN_KEY,result.token);profile=result.profile;localStorage.setItem(PROFILE_KEY,JSON.stringify(profile));updateProfileUI();openAccountData();notifyCart('Номер подтверждён. Вы вошли в Doner Club.');return;
+      }
+      status.textContent='Ожидаем подтверждения номера в Telegram…';
+    }catch(e){
+      if(stopped||view!==accountView)return;
+      status.textContent=e.status===400?e.message:'Соединение прервалось. Повторяем проверку…';
+      if(e.status===400)return stop();
+    }finally{busy=false}
+    if(!stopped)timer=setTimeout(poll,document.hidden?5000:2000);
+  }
+  window.addEventListener('focus',wake);document.addEventListener('visibilitychange',wake);poll();
 }
 async function logoutCustomer(){
   const token=customerToken();
